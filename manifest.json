@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "极简翻译 - 自定义大模型网页翻译",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "一键将整个网页翻译成中文，支持悬浮翻译和全文翻译",
   "permissions": [
     "activeTab",
