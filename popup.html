@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>极简翻译</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #ffffff;
+      --bg-soft: #f5f6f8;
+      --bg-hover: #eceef2;
+      --border: #e4e6eb;
+      --text: #1a1a1a;
+      --text-muted: #5a6068;
+      --text-dim: #9aa0ab;
+      --primary: #4f46e5;
+      --primary-hover: #4338ca;
+      --success: #16a34a;
+      --warn: #d97706;
+      --error: #dc2626;
+    }
+
+    body {
+      width: 300px;
+      font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    /* ── 顶部：logo + 域名 + 状态 ── */
+    .header {
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      z-index: 10;
+    }
+
+    .logo {
+      width: 28px; height: 28px;
+      background: linear-gradient(135deg, #4f46e5, #7c3aed);
+      border-radius: 7px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 700; color: white;
+      flex-shrink: 0;
+    }
+
+    .header-mid {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .app-name {
+      font-size: 13px; font-weight: 600; color: var(--text);
+    }
+
+    .site {
+      font-size: 11px; color: var(--text-dim);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      max-width: 160px;
+    }
+
+    .status-chip {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 11px; color: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    .dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: #c4c8cf; flex-shrink: 0;
+    }
+    .dot.ok     { background: var(--success); }
+    .dot.loading{ background: var(--warn); animation: pulse 1s infinite; }
+    .dot.err    { background: var(--error); }
+    @keyframes pulse { 50% { opacity: .35; } }
+
+    /* ── 操作按钮区 ── */
+    .actions {
+      padding: 12px 14px 10px;
+      display: flex; gap: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .btn {
+      flex: 1; padding: 9px 0;
+      border: none; border-radius: 8px;
+      font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: all .15s;
+      font-family: inherit;
+    }
+
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+
+    .btn-ghost {
+      background: var(--bg-soft); color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { background: var(--bg-hover); }
+    .btn-ghost:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* ── 开关列表 ── */
+    .options { padding: 4px 14px 2px; }
+
+    .opt {
+      display: flex; align-items: center;
+      justify-content: space-between;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .opt:last-child { border-bottom: none; }
+
+    .opt-label { font-size: 13px; color: var(--text); font-weight: 500; }
+
+    .toggle {
+      width: 32px; height: 18px;
+      background: #d0d4db;
+      border-radius: 9px;
+      cursor: pointer; position: relative; border: none;
+      transition: background .2s; flex-shrink: 0;
+    }
+    .toggle::after {
+      content: '';
+      position: absolute; top: 2px; left: 2px;
+      width: 14px; height: 14px;
+      border-radius: 50%; background: white;
+      transition: all .2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,.18);
+    }
+    .toggle.on { background: var(--primary); }
+    .toggle.on::after { left: 16px; }
+
+    /* ── 底部设置入口 ── */
+    .settings-link {
+      display: block; width: 100%; padding: 9px;
+      background: transparent; border: none; border-top: 1px solid var(--border);
+      color: var(--text-dim); font-size: 11px;
+      cursor: pointer; text-align: center; font-family: inherit;
+    }
+    .settings-link:hover { color: var(--primary); }
+
+    /* ── 设置面板 ── */
+    .settings {
+      display: none;
+      padding: 14px 14px 16px;
+      background: var(--bg-soft);
+      border-top: 1px solid var(--border);
+    }
+    .settings.show { display: block; }
+
+    .field { margin-bottom: 10px; }
+    .field label {
+      display: block; font-size: 11px; font-weight: 600;
+      color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .4px;
+    }
+    .field input, .field textarea, .field select {
+      width: 100%; padding: 8px 10px;
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text);
+      font-size: 12px; font-family: inherit; outline: none;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .field input:focus, .field textarea:focus, .field select:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(79,70,229,.1);
+    }
+    .field textarea { resize: vertical; min-height: 56px; line-height: 1.5; }
+    .field .hint { font-size: 10px; color: var(--text-dim); margin-top: 3px; }
+
+    .save-row { display: flex; gap: 8px; margin-top: 4px; }
+    .save-row .btn { padding: 8px 0; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <!-- 头部：logo + 域名 + 状态 -->
+  <div class="header">
+    <div class="logo">译</div>
+    <div class="header-mid">
+      <div class="app-name">极简翻译</div>
+      <div class="site" id="siteText">—</div>
+    </div>
+    <div class="status-chip">
+      <div class="dot" id="dot"></div>
+      <span id="statusText">就绪</span>
+    </div>
+  </div>
+
+  <!-- 翻译 / 还原 -->
+  <div class="actions">
+    <button class="btn btn-primary" id="btnTranslate">翻译此页面</button>
+    <button class="btn btn-ghost" id="btnRestore" disabled>还原</button>
+  </div>
+
+  <!-- 功能开关 -->
+  <div class="options">
+    <div class="opt">
+      <span class="opt-label">英文自动翻译</span>
+      <button class="toggle" id="toggleAutoEn"></button>
+    </div>
+    <div class="opt">
+      <span class="opt-label">双语对照</span>
+      <button class="toggle" id="toggleBilingual"></button>
+    </div>
+    <div class="opt">
+      <span class="opt-label">悬浮取词</span>
+      <button class="toggle" id="toggleHover"></button>
+    </div>
+  </div>
+
+  <button class="settings-link" id="btnSettings">⚙ 模型设置</button>
+
+  <!-- 设置面板 -->
+  <div class="settings" id="settingsPanel">
+    <div class="field">
+      <label>API 地址</label>
+      <input id="apiUrl" type="text" placeholder="https://api.openai.com/v1/chat/completions">
+      <div class="hint">支持 DeepSeek / Kimi / Qwen / Ollama 等 OpenAI 兼容协议</div>
+    </div>
+    <div class="field">
+      <label>API Key</label>
+      <input id="apiKey" type="password" placeholder="sk-...">
+    </div>
+    <div class="field">
+      <label>模型</label>
+      <input id="model" type="text" placeholder="gpt-4o-mini">
+    </div>
+    <div class="field">
+      <label>翻译提示词</label>
+      <textarea id="prompt" placeholder="自定义系统提示词"></textarea>
+    </div>
+    <div class="field">
+      <label>朗读引擎</label>
+      <select id="ttsEngine">
+        <option value="browser">浏览器内置</option>
+        <option value="mimo">MiMo TTS（小米）</option>
+      </select>
+    </div>
+    <div class="field" id="mimoKeyRow" style="display:none;">
+      <label>MiMo API Key</label>
+      <input id="mimoApiKey" type="password" placeholder="从小米 MiMo 开放平台获取">
+      <div class="hint">前往 platform.xiaomimimo.com 申请</div>
+    </div>
+    <div class="save-row">
+      <button class="btn btn-ghost" id="btnTest">测试</button>
+      <button class="btn btn-primary" id="btnSave">保存</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
