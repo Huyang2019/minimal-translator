@@ -9,6 +9,7 @@ const DEFAULTS = {
   hoverTranslate: false,
   alwaysSites: [],
   autoTranslateEnglish: false,
+  inlineTts: false,
   ttsEngine: 'browser',
   mimoApiKey: '',
 };
@@ -43,6 +44,7 @@ function renderToggles() {
   $('toggleBilingual').classList.toggle('on', cfg.bilingual);
   $('toggleHover').classList.toggle('on', cfg.hoverTranslate);
   $('toggleAutoEn').classList.toggle('on', cfg.autoTranslateEnglish);
+  $('toggleInlineTts').classList.toggle('on', cfg.inlineTts);
   $('btnRestore').disabled = !isTranslated;
 }
 
@@ -131,6 +133,13 @@ $('toggleHover').addEventListener('click', async () => {
   await save();
   renderToggles();
   try { await send({ action: 'setHover', enabled: cfg.hoverTranslate }); } catch {}
+});
+
+$('toggleInlineTts').addEventListener('click', async () => {
+  cfg.inlineTts = !cfg.inlineTts;
+  await save();
+  renderToggles();
+  try { await send({ action: 'setInlineTts', enabled: cfg.inlineTts }); } catch {}
 });
 
 $('btnSettings').addEventListener('click', () => $('settingsPanel').classList.toggle('show'));

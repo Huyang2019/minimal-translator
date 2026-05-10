@@ -7,6 +7,7 @@
     isTranslated: false,
     bilingual: false,              // 当前翻译模式（首次 translatePage 时设置）
     hoverEnabled: false,
+    inlineTts: false,              // 段落内联朗读按钮开关
     originalTexts: new Map(),      // node -> originalText（element 存 innerHTML）
     hoverTooltip: null,
     hoverTimer: null,
@@ -31,6 +32,8 @@
   // （stagger 动画初始 opacity:0 时 innerText 返回空，会漏掉标题）
   function getText(node) {
     if (node.nodeType === Node.ELEMENT_NODE) {
+      if ((node.tagName === 'INPUT' || node.tagName === 'TEXTAREA') && node.placeholder)
+        return node.placeholder.trim();
       return (node.innerText || node.textContent || '').trim();
     }
     return (node.textContent || '').trim();
@@ -76,6 +79,17 @@
     );
     let n;
     while ((n = walker.nextNode())) nodes.push(n);
+
+    // 3) input / textarea 的 placeholder 属性
+    const placeholderEls = (root === document.body ? document : root)
+      .querySelectorAll('input[placeholder], textarea[placeholder]');
+    for (const el of placeholderEls) {
+      if (el.closest('script,style,noscript')) continue;
+      const text = el.placeholder.trim();
+      if (!text || text.length < 2 || isMostlyChinese(text)) continue;
+      nodes.push(el);
+    }
+
     return nodes;
   }
 
@@ -202,6 +216,14 @@
   // 应用翻译结果（element 存 innerHTML、text node 存 textContent）
   function applyTranslation(node, translated, bilingual) {
     const isEl = node.nodeType === Node.ELEMENT_NODE;
+
+    // input / textarea placeholder
+    if (isEl && (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA') && node.placeholder) {
+      if (!state.originalTexts.has(node)) state.originalTexts.set(node, node.placeholder);
+      node.placeholder = translated;
+      return;
+    }
+
     // 仅首次记录原文；如果已存在（说明节点之前被翻译过、又被外部覆盖回英文），保留最初的原文
     if (!state.originalTexts.has(node)) {
       state.originalTexts.set(node, isEl ? node.innerHTML : node.textContent);
@@ -246,7 +268,10 @@
       if (cached === undefined) { pending.push(text); continue; }
       if (cached === text) continue;
       for (const node of nodes) {
-        if (node.isConnected) applyTranslation(node, cached, bilingual);
+        if (node.isConnected) {
+          applyTranslation(node, cached, bilingual);
+          addInlineTtsBtn(node, text);
+        }
       }
     }
 
@@ -334,6 +359,7 @@
 
     if (isText) {
       if (state.inflight.has(node)) return;
+      if (startEl && state.inflight.has(startEl)) return; // 父元素也受 inflight 保护
       const t = node.textContent.trim();
       if (t && t.length >= 2 && !isMostlyChinese(t)) state.pendingNodes.add(node);
     } else {
@@ -420,11 +446,15 @@
     stopLiveMode();
     for (const [node, original] of state.originalTexts) {
       if (!node.isConnected) continue;
-      if (node.nodeType === Node.ELEMENT_NODE) node.innerHTML = original;
-      else node.textContent = original;
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        if (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA') node.placeholder = original;
+        else node.innerHTML = original;
+      } else {
+        node.textContent = original;
+      }
     }
     state.originalTexts.clear();
-    document.querySelectorAll('.__dfy-translated').forEach(el => el.remove());
+    document.querySelectorAll('.__dfy-translated, .__dfy-tts').forEach(el => el.remove());
     state.isTranslated = false;
   }
 
@@ -490,6 +520,137 @@
       utt.onend = utt.onerror = () => setBtnActive(btn, false);
       speechSynthesis.speak(utt);
     }
+  }
+
+  // 段落内联朗读按钮：原文单词数达到阈值时，在段落末尾插入小喇叭
+  const INLINE_TTS_MIN_WORDS = 6;
+
+  function enWordCount(text) {
+    return (text.match(/[a-zA-Z]{2,}/g) || []).length;
+  }
+
+  // 按句子拆分，避免长文本等待整段处理完才开始播放
+  function splitSentences(text) {
+    const parts = text.match(/[^.!?]+[.!?]*/g) || [text];
+    return parts.map(s => s.trim()).filter(s => s.length > 0);
+  }
+
+  // 内联段落朗读：拆句并行发起请求/顺序播放，完成后回调
+  async function speakInline(text, btn, onDone) {
+    window.speechSynthesis.cancel();
+    const { ttsEngine } = await chrome.storage.local.get({ ttsEngine: 'browser' });
+    const sentences = splitSentences(text);
+
+    if (ttsEngine === 'mimo') {
+      // 并行发起所有句子的 API 请求，按顺序播放
+      const urlPromises = sentences.map(s =>
+        chrome.runtime.sendMessage({ action: 'bgTts', text: s })
+          .then(res => {
+            if (!res?.ok) return null;
+            const bytes = Uint8Array.from(atob(res.audio), c => c.charCodeAt(0));
+            return URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
+          })
+          .catch(() => null)
+      );
+      for (const urlP of urlPromises) {
+        if (btn.dataset.active !== '1') break;
+        const url = await urlP;
+        if (!url) continue;
+        await new Promise(res => {
+          const a = new Audio(url);
+          a.onended = a.onerror = () => { URL.revokeObjectURL(url); res(); };
+          a.play();
+        });
+      }
+    } else {
+      // 浏览器：把所有句子依次入队，立即开始播放第一句
+      const voice = pickEnVoice();
+      await new Promise(resolve => {
+        sentences.forEach((s, i) => {
+          const utt = new SpeechSynthesisUtterance(s);
+          utt.lang = 'en-US'; utt.rate = 1;
+          if (voice) utt.voice = voice;
+          if (i === sentences.length - 1) { utt.onend = resolve; utt.onerror = resolve; }
+          speechSynthesis.speak(utt);
+        });
+      });
+    }
+    onDone?.();
+  }
+
+  function addInlineTtsBtn(node, originalText) {
+    if (!state.inlineTts) return;
+    if (!originalText || enWordCount(originalText) < INLINE_TTS_MIN_WORDS) return;
+    const isEl = node.nodeType === Node.ELEMENT_NODE;
+    if (isEl && (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA')) return;
+    const container = isEl ? node : node.parentElement;
+    if (!container || container.querySelector('.__dfy-tts')) return;
+
+    // 按钮创建时捕获当前译文（此时 applyTranslation 已执行完）
+    const translatedText = node.textContent;
+
+    const btn = document.createElement('button');
+    btn.className = '__dfy-tts';
+    btn.title = '朗读原文';
+    btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>';
+    btn.style.cssText = [
+      'display:inline-flex', 'align-items:center', 'justify-content:center',
+      'width:22px', 'height:22px', 'margin-left:6px',
+      'border:none', 'border-radius:5px', 'background:#eef2ff',
+      'color:#6366f1', 'cursor:pointer', 'vertical-align:middle',
+      'padding:0', 'transition:background .15s, color .15s',
+      'position:relative', 'top:-1px', 'flex-shrink:0',
+    ].join(';');
+
+    btn.addEventListener('mouseenter', () => {
+      if (btn.dataset.active !== '1') { btn.style.background = '#e0e7ff'; btn.style.color = '#4338ca'; }
+    });
+    btn.addEventListener('mouseleave', () => {
+      if (btn.dataset.active !== '1') { btn.style.background = '#eef2ff'; btn.style.color = '#6366f1'; }
+    });
+
+    // 暂停/恢复 MutationObserver，防止文本切换被误判为新内容
+    const pauseMO = () => state.mutationObserver?.disconnect();
+    const resumeMO = () => {
+      if (state.mutationObserver && state.isTranslated) {
+        state.mutationObserver.observe(document.body, {
+          childList: true, subtree: true, characterData: true,
+          attributes: true, attributeFilter: ['class', 'style', 'hidden', 'aria-hidden'],
+        });
+      }
+    };
+
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      // 正在播放 → 停止并还原译文
+      if (btn.dataset.active === '1') {
+        window.speechSynthesis.cancel();
+        setBtnActive(btn, false);
+        state.inflight.delete(node);
+        state.inflight.delete(container);
+        pauseMO();
+        if (node.isConnected && state.isTranslated) node.textContent = translatedText;
+        resumeMO();
+        return;
+      }
+      // 开始：inflight 锁 + 断开 MO，双重防止原文被立即翻译回去
+      state.inflight.add(node);
+      state.inflight.add(container);
+      setBtnActive(btn, true);
+      pauseMO();
+      if (node.isConnected) node.textContent = originalText;
+      resumeMO();
+      // 朗读完成后解锁并还原译文
+      await speakInline(originalText, btn, null);
+      setBtnActive(btn, false);
+      state.inflight.delete(node);
+      state.inflight.delete(container);
+      pauseMO();
+      if (node.isConnected && state.isTranslated) node.textContent = translatedText;
+      resumeMO();
+    });
+
+    container.appendChild(btn);
   }
 
   function getTooltip() {
@@ -601,7 +762,10 @@
           if (translated && original && translated !== original) {
             cacheSet(original, translated);
             for (const node of text2nodes.get(original) || []) {
-              if (node.isConnected) applyTranslation(node, translated, bilingual);
+              if (node.isConnected) {
+                applyTranslation(node, translated, bilingual);
+                addInlineTtsBtn(node, original);
+              }
             }
           }
         }
@@ -632,6 +796,12 @@
         sendResponse({ success: true });
         break;
 
+      case 'setInlineTts':
+        state.inlineTts = !!msg.enabled;
+        if (!msg.enabled) document.querySelectorAll('.__dfy-tts').forEach(el => el.remove());
+        sendResponse({ success: true });
+        break;
+
       case 'getState':
         sendResponse({ isTranslated: state.isTranslated, hoverEnabled: state.hoverEnabled });
         break;
@@ -654,10 +824,11 @@
   (async function autoCheck() {
     if (window.top !== window) return; // 跳过 iframe
 
-    // 恢复悬浮取词开关（页面刷新后 state.hoverEnabled 默认 false，需从存储读取）
+    // 恢复开关状态（页面刷新后从存储读取）
     try {
-      const stored = await chrome.storage.local.get({ hoverTranslate: false });
+      const stored = await chrome.storage.local.get({ hoverTranslate: false, inlineTts: false });
       state.hoverEnabled = !!stored.hoverTranslate;
+      state.inlineTts = !!stored.inlineTts;
     } catch {}
 
     let res;
